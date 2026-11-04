@@ -1,0 +1,12 @@
+# Mount the dsh-web-remote plugin into a DSH profile.
+#
+# `dsh plugin --profile <name> add dsh-phone-remote` installs this package
+# and registers this patch layer automatically — no manual edit needed. The
+# row carries no config on purpose: the relay is configured from the DSH web
+# GUI console (sidebar 📱 entry) and persisted in a storage domain. To pin the
+# relay from the deployment instead, add a `config:` block here (relayHttpUrl,
+# hostId, hostSecret, registrationToken, ...).
+
+- insert:
+    - id: web-remote-host
+      name: 'dsh-phone-remote'

@@ -1,0 +1,10 @@
+{
+  "name": "@dsh-web-remote/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Wire protocol for dsh-web-remote: control messages, relay frames, fragmentation, ACK and replay",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

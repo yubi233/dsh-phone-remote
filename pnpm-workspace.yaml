@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+
+# esbuild ships a native binary via a postinstall script; pnpm blocks build
+# scripts by default, so a fresh clone needs this allowance to build.
+allowBuilds:
+  esbuild: true
