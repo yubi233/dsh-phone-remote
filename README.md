@@ -4,6 +4,10 @@
 Harness](https://github.com/) 的电脑接入中继（relay），让手机通过专用移动壳远程
 使用它——会话列表、流式对话、审批、附件、终端、文件浏览，全部经中继转发。
 
+**在线演示**：[yubi233.github.io/dsh-phone-remote](https://yubi233.github.io/dsh-phone-remote/)
+—— 纯前端 mock（静态页，无 relay、无真实会话），渠道名已脱敏为「演示渠道 A–E」，
+数据全部在浏览器内模拟。
+
 一个包，两个半区：
 
 - **Host 半区**（`lib/index.js`，Node）：cordis 插件。向 relay 注册本机、维持出站
