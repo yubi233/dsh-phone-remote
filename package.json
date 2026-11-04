@@ -1,6 +1,6 @@
 {
   "name": "dsh-phone-remote",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "description": "DSH Host side of dsh-web-remote: relay transport, pairing, RPC bridge, stream replay, and the web GUI console",
   "license": "MIT",

@@ -1,16 +1,23 @@
 /**
- * Browser half of the dsh-web-remote plugin: a console inside the DSH web GUI.
+ * Browser half of the dsh-web-remote plugin: the remote-access console inside
+ * the DSH web GUI.
  *
  * Injected by the client-modules loader (`dsh.client.platform === 'web'`).
- * It adds one entry beside the sidebar settings trigger and renders a floating
- * panel that drives the Host half's `/api/web-remote/*` routes: relay setup,
- * the pairing QR, and paired-device management. The phone itself keeps using
- * the dedicated mobile shell hosted by the relay.
+ * It contributes two seats and shares one console body between them:
+ *
+ * - `settings.section` — a full page in Settings (nav label 「手机远程」) where
+ *   a pairing QR is minted automatically;
+ * - `plugins.detail.section` — a section on this package's own Plugins detail
+ *   page, so a freshly installed plugin can be inspected and paired in place
+ *   (the code is minted on request there; two page instances must not mint
+ *   competing pairings).
+ *
+ * Both drive the Host half's `/api/web-remote/*` routes. The phone itself keeps
+ * using the dedicated mobile shell served by the relay.
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import { createPortal } from 'react-dom'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   createConsolePairing,
@@ -27,70 +34,114 @@ import type { ConsoleDevice, ConsolePairing, ConsoleStatus } from './api.ts'
 /** Cordis services this client face needs. */
 export const inject = ['slots']
 
+/** Options a list-slot register call accepts here. */
+interface SlotRegisterOptions {
+  /** SlotMap key, for example `settings.section`. */
+  name: string
+  /** Cell key of this contribution. */
+  id: string
+  /** Position among the entries, ascending. */
+  order?: number
+  /** Display text where the owner projects one (settings nav). */
+  label?: string
+}
+
+/**
+ * A registered component. The shell supplies the real owner props at render
+ * time; this client face declares them per component and only needs the
+ * register call to accept it, hence the `never` parameter.
+ */
+type SlotComponent = (props: never) => ReactNode
+
 /** Structural slice of the client root context this plugin touches. */
 interface ConsoleContext {
   slots: {
     inject(key: string, callback: () => () => void): () => void
-    register(
-      options: { name: string; id: string; order?: number },
-      component: (props: ConsoleEntryProps) => ReactNode,
-    ): () => void
+    register(options: SlotRegisterOptions, component: SlotComponent): () => void
   }
 }
 
-/** Props the sidebar footer seat passes to its actions. */
-interface ConsoleEntryProps {
-  /** Whether the sidebar renders wide content (false = narrow rail). */
-  wide?: boolean
+/** Props the settings section owner passes down. */
+interface SettingsSectionProps {
+  /** Close the settings panel (the shell owns the open state). */
+  close: () => void
+}
+
+/** Structural slice of the plugins detail subject this section inspects. */
+interface PluginsSubjectLike {
+  kind?: string
+  pkg?: { name?: string }
+}
+
+/** Props the plugins detail page passes to every section. */
+interface PluginDetailSectionProps {
+  /** The subject of the open detail page. */
+  subject: PluginsSubjectLike
 }
 
 /**
- * Register the console entry beside the sidebar settings trigger.
+ * Register the console seats: one settings page and one section on this
+ * package's Plugins detail page.
  * @param ctx - client root context.
  */
 export function apply(ctx: ConsoleContext): void {
-  ctx.slots.inject('sidebar.footer.action', () => {
-    try {
-      return ctx.slots.register(
-        { name: 'sidebar.footer.action', id: 'web-remote-console', order: 100 },
-        ConsoleEntry,
-      )
-    } catch {
-      // A colliding registration must not break the shell; the entry is
-      // re-declared on the next injection epoch if the collision goes away.
-      return () => undefined
-    }
-  })
-}
-
-function ConsoleEntry(_props: ConsoleEntryProps): ReactNode {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button
-        type="button"
-        title="手机远程"
-        aria-label="手机远程"
-        onClick={() => setOpen(true)}
-        style={entryButtonStyle}
-      >
-        📱
-      </button>
-      {open ? <ConsolePanel onClose={() => setOpen(false)} /> : null}
-    </>
+  ctx.slots.inject('settings.section', () =>
+    registerTolerant(ctx, { name: 'settings.section', id: 'web-remote', order: 50, label: '手机远程' }, SettingsPage),
+  )
+  ctx.slots.inject('plugins.detail.section', () =>
+    registerTolerant(ctx, { name: 'plugins.detail.section', id: 'web-remote', order: 50 }, PluginDetailSection),
   )
 }
 
-const STATE_LABELS: Record<string, string> = {
-  unconfigured: '未配置',
-  idle: '空闲',
-  connecting: '连接中',
-  online: '在线',
-  offline: '离线',
-  stopped: '已停止',
+/**
+ * Register one seat without letting a collision (double activation, hot
+ * reload) break the shell. The entry is re-declared on the next injection
+ * epoch if the collision goes away.
+ */
+function registerTolerant(ctx: ConsoleContext, options: SlotRegisterOptions, component: SlotComponent): () => void {
+  try {
+    return ctx.slots.register(options, component)
+  } catch {
+    return () => undefined
+  }
 }
 
-function ConsolePanel(props: { onClose: () => void }): ReactNode {
+function SettingsPage(_props: SettingsSectionProps): ReactNode {
+  return (
+    <div style={pageStyle}>
+      <header style={pageHeaderStyle}>
+        <h2 style={pageTitleStyle}>手机远程</h2>
+        <p style={mutedStyle}>
+          手机与这台电脑连上同一个网络后，用手机打开下面的局域网地址，或扫描二维码配对即可继续会话。
+        </p>
+      </header>
+      <ConsoleBody autoMint />
+    </div>
+  )
+}
+
+function PluginDetailSection(props: PluginDetailSectionProps): ReactNode {
+  if (!isOwnSubject(props.subject)) return null
+  return (
+    <section style={detailSectionStyle} aria-label="手机远程">
+      <div style={sectionHeadStyle}>
+        <h3 style={detailTitleStyle}>手机远程</h3>
+        <span style={mutedStyle}>dsh-phone-remote</span>
+      </div>
+      <p style={mutedStyle}>
+        安装后即可配对手机。设置 → 手机远程 是同一份控制的完整页面；这里也可以直接生成配对码。
+      </p>
+      <ConsoleBody autoMint={false} />
+    </section>
+  )
+}
+
+/** Whether a Plugins detail page is showing this package. */
+function isOwnSubject(subject: PluginsSubjectLike | undefined): boolean {
+  return subject?.pkg?.name === 'dsh-phone-remote'
+}
+
+function ConsoleBody(props: { autoMint: boolean }): ReactNode {
   const [status, setStatus] = useState<ConsoleStatus | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | undefined>(undefined)
 
@@ -116,29 +167,29 @@ function ConsolePanel(props: { onClose: () => void }): ReactNode {
     void refreshStatus()
   }, [refreshStatus])
 
-  return createPortal(
-    <div style={backdropStyle} onClick={props.onClose}>
-      <div style={panelStyle} onClick={(event) => event.stopPropagation()}>
-        <div style={headerStyle}>
-          <strong>手机远程</strong>
-          <button type="button" style={ghostButtonStyle} onClick={props.onClose} aria-label="关闭">
-            ✕
-          </button>
-        </div>
-        {loadError !== undefined ? <p style={errorStyle}>{loadError}</p> : null}
-        {status === undefined && loadError === undefined ? <p style={mutedStyle}>读取中…</p> : null}
-        {status !== undefined ? (
-          <>
-            <StatusCard status={status} onRefresh={() => void refreshStatus()} onRestart={() => void restart()} />
-            <SetupCard status={status} onConfigured={() => void refreshStatus()} />
-            {status.configured ? <PairingCard /> : null}
-            {status.configured ? <DevicesCard /> : null}
-          </>
-        ) : null}
-      </div>
-    </div>,
-    document.body,
+  return (
+    <div style={bodyStyle}>
+      {loadError !== undefined ? <p style={errorStyle}>{loadError}</p> : null}
+      {status === undefined && loadError === undefined ? <p style={mutedStyle}>读取中…</p> : null}
+      {status !== undefined ? (
+        <>
+          <StatusCard status={status} onRefresh={() => void refreshStatus()} onRestart={() => void restart()} />
+          <SetupCard status={status} onConfigured={() => void refreshStatus()} />
+          {status.configured ? <PairingCard autoMint={props.autoMint} /> : null}
+          {status.configured ? <DevicesCard /> : null}
+        </>
+      ) : null}
+    </div>
   )
+}
+
+const STATE_LABELS: Record<string, string> = {
+  unconfigured: '未配置',
+  idle: '空闲',
+  connecting: '连接中',
+  online: '在线',
+  offline: '离线',
+  stopped: '已停止',
 }
 
 function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void; onRestart: () => void }): ReactNode {
@@ -162,9 +213,7 @@ function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void; onRes
         <div style={mutedStyle}>中继：{state.relayHttpUrl}</div>
       ) : null}
       {state.lastError !== undefined ? (
-        <div style={errorStyle}>
-          最近错误：{state.lastError.message ?? state.lastError.code}
-        </div>
+        <div style={errorStyle}>最近错误：{state.lastError.message ?? state.lastError.code}</div>
       ) : null}
       <div style={rowStyle}>
         <button type="button" style={ghostButtonStyle} onClick={props.onRefresh}>
@@ -225,9 +274,7 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
     <section style={cardStyle}>
       <strong>中继服务器</strong>
       {props.status.localRelay !== undefined ? (
-        <div style={mutedStyle}>
-          当前使用内置局域网中继，无需填写。要改用外部中继时在下方填写地址。
-        </div>
+        <div style={mutedStyle}>当前使用内置局域网中继，无需填写。要改用外部中继时在下方填写地址。</div>
       ) : null}
       <label style={labelStyle}>
         中继地址
@@ -249,7 +296,12 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
         />
       </label>
       <div style={rowStyle}>
-        <button type="button" style={primaryButtonStyle} disabled={busy || relayUrl.trim() === ''} onClick={() => void submit()}>
+        <button
+          type="button"
+          style={primaryButtonStyle}
+          disabled={busy || relayUrl.trim() === ''}
+          onClick={() => void submit()}
+        >
           {busy ? '连接中…' : '保存并连接'}
         </button>
         {props.status.localRelay === undefined ? (
@@ -264,7 +316,7 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
   )
 }
 
-function PairingCard(): ReactNode {
+function PairingCard(props: { autoMint: boolean }): ReactNode {
   const [pairing, setPairing] = useState<ConsolePairing | undefined>(undefined)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
@@ -282,21 +334,22 @@ function PairingCard(): ReactNode {
   }, [])
 
   useEffect(() => {
-    void mint()
-  }, [mint])
+    if (props.autoMint) void mint()
+  }, [mint, props.autoMint])
 
+  const showMintButton = pairing !== undefined || error !== undefined || !props.autoMint
   return (
     <section style={cardStyle}>
       <div style={cardTitleStyle}>
         <strong>配对手机</strong>
-        {pairing !== undefined ? (
+        {showMintButton ? (
           <button type="button" style={ghostButtonStyle} disabled={busy} onClick={() => void mint()}>
-            重新生成
+            {pairing === undefined ? '生成配对码' : '重新生成'}
           </button>
         ) : null}
       </div>
       {error !== undefined ? <div style={errorStyle}>{error}</div> : null}
-      {pairing === undefined && error === undefined ? <div style={mutedStyle}>生成中…</div> : null}
+      {pairing === undefined && error === undefined && props.autoMint ? <div style={mutedStyle}>生成中…</div> : null}
       {pairing !== undefined ? (
         <>
           {pairing.url !== undefined ? (
@@ -377,51 +430,60 @@ function pairingCodeGrouped(code: string): string {
   return code.length === 8 ? `${code.slice(0, 4)} ${code.slice(4)}` : code
 }
 
-const entryButtonStyle = {
-  border: 'none',
-  background: 'transparent',
-  cursor: 'pointer',
-  fontSize: '18px',
-  lineHeight: 1,
-  padding: '6px',
+// Styles use the shell's design aliases so both light and dark themes work;
+// the fallbacks keep the console readable in a bare React harness.
+const pageStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '16px',
+  maxWidth: '560px',
+  color: 'var(--dsw-alias-label-primary, #111)',
 } as const
 
-const backdropStyle = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 10_000,
-  background: 'rgba(0, 0, 0, 0.25)',
+const pageHeaderStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '6px',
 } as const
 
-const panelStyle = {
-  position: 'fixed',
-  top: '16px',
-  left: '72px',
-  width: '348px',
-  maxHeight: 'calc(100vh - 32px)',
-  overflowY: 'auto',
-  background: 'var(--dsh-surface, #fff)',
-  color: 'var(--dsh-text, #111)',
-  border: '1px solid rgba(0, 0, 0, 0.12)',
-  borderRadius: '12px',
-  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.18)',
-  padding: '14px',
+const pageTitleStyle = {
+  margin: 0,
+  fontSize: '17px',
+  fontWeight: 600,
+  lineHeight: 1.4,
+} as const
+
+const bodyStyle = {
   display: 'flex',
   flexDirection: 'column',
   gap: '12px',
-  boxSizing: 'border-box',
 } as const
 
-const headerStyle = {
+const detailSectionStyle = {
   display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
+  flexDirection: 'column',
+  gap: '12px',
+  color: 'var(--dsw-alias-label-primary, #111)',
+} as const
+
+const sectionHeadStyle = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '10px',
+} as const
+
+const detailTitleStyle = {
+  margin: 0,
+  fontSize: '15px',
+  fontWeight: 600,
+  lineHeight: 1.4,
 } as const
 
 const cardStyle = {
-  border: '1px solid rgba(0, 0, 0, 0.08)',
-  borderRadius: '10px',
-  padding: '10px 12px',
+  border: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.12))',
+  borderRadius: 'var(--dsw-radius-md, 12px)',
+  background: 'var(--dsw-alias-settings-card-fill, rgba(127, 127, 127, 0.04))',
+  padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
   gap: '8px',
@@ -442,25 +504,27 @@ const labelStyle = {
 
 const inputStyle = {
   padding: '7px 9px',
-  borderRadius: '8px',
-  border: '1px solid rgba(0, 0, 0, 0.16)',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
+  border: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.16))',
+  background: 'var(--dsw-alias-bg-layer-1, #fff)',
+  color: 'inherit',
   font: 'inherit',
 } as const
 
 const primaryButtonStyle = {
   padding: '7px 12px',
-  borderRadius: '8px',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
   border: 'none',
-  background: '#2563eb',
-  color: '#fff',
+  background: 'var(--dsw-alias-button-primary-fill, #2563eb)',
+  color: 'var(--dsw-alias-label-primary-foreground, #fff)',
   cursor: 'pointer',
   font: 'inherit',
 } as const
 
 const ghostButtonStyle = {
   padding: '4px 9px',
-  borderRadius: '8px',
-  border: '1px solid rgba(0, 0, 0, 0.14)',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
+  border: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.14))',
   background: 'transparent',
   color: 'inherit',
   cursor: 'pointer',
@@ -469,7 +533,7 @@ const ghostButtonStyle = {
 
 const dangerButtonStyle = {
   padding: '3px 8px',
-  borderRadius: '8px',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
   border: '1px solid rgba(220, 38, 38, 0.35)',
   background: 'transparent',
   color: '#dc2626',
@@ -478,8 +542,10 @@ const dangerButtonStyle = {
 } as const
 
 const mutedStyle = {
-  color: 'rgba(0, 0, 0, 0.55)',
+  margin: 0,
+  color: 'var(--dsw-alias-label-secondary, rgba(0, 0, 0, 0.55))',
   fontSize: '13px',
+  lineHeight: 1.5,
 } as const
 
 const errorStyle = {
@@ -502,8 +568,8 @@ const lanUrlBoxStyle = {
   flexDirection: 'column',
   gap: '4px',
   padding: '8px 10px',
-  borderRadius: '8px',
-  background: 'rgba(37, 99, 235, 0.08)',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
+  background: 'var(--dsw-alias-bg-layer-1, rgba(37, 99, 235, 0.08))',
 } as const
 
 const lanUrlStyle = {
@@ -523,8 +589,8 @@ const qrWrapStyle = {
   justifyContent: 'center',
   padding: '6px',
   background: '#fff',
-  borderRadius: '8px',
-  border: '1px solid rgba(0, 0, 0, 0.08)',
+  borderRadius: 'var(--dsw-radius-sm, 8px)',
+  border: '1px solid var(--dsw-alias-border-l3, rgba(0, 0, 0, 0.08))',
 } as const
 
 function stateLabelStyle(online: boolean): React.CSSProperties {
@@ -532,7 +598,7 @@ function stateLabelStyle(online: boolean): React.CSSProperties {
     fontSize: '12px',
     padding: '2px 8px',
     borderRadius: '999px',
-    background: online ? 'rgba(21, 128, 61, 0.12)' : 'rgba(0, 0, 0, 0.08)',
+    background: online ? 'rgba(21, 128, 61, 0.12)' : 'rgba(127, 127, 127, 0.16)',
     color: online ? '#15803d' : 'inherit',
   }
 }
@@ -558,7 +624,7 @@ function deviceBadgeStyle(online: boolean): React.CSSProperties {
     padding: '1px 8px',
     borderRadius: '999px',
     flexShrink: 0,
-    background: online ? 'rgba(21, 128, 61, 0.12)' : 'rgba(0, 0, 0, 0.08)',
-    color: online ? '#15803d' : 'rgba(0, 0, 0, 0.55)',
+    background: online ? 'rgba(21, 128, 61, 0.12)' : 'rgba(127, 127, 127, 0.16)',
+    color: online ? '#15803d' : 'var(--dsw-alias-label-secondary, rgba(0, 0, 0, 0.55))',
   }
 }
