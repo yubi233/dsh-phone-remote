@@ -15,6 +15,8 @@ export interface ConsoleStatus {
   relayHttpUrl?: string
   hostId?: string
   registrationTokenSet: boolean
+  /** Present while the built-in LAN relay is serving the phone shell. */
+  localRelay?: { lanUrl: string; port: number }
   lastError?: { code: string; message?: string }
 }
 
@@ -148,10 +150,33 @@ function parseStatus(value: unknown): ConsoleStatus {
     ...(typeof record['relayHttpUrl'] === 'string' ? { relayHttpUrl: record['relayHttpUrl'] as string } : {}),
     ...(typeof record['hostId'] === 'string' ? { hostId: record['hostId'] as string } : {}),
     registrationTokenSet: record['registrationTokenSet'] === true,
+    ...(typeof record['localRelay'] === 'object' && record['localRelay'] !== null
+      ? { localRelay: parseLocalRelay(record['localRelay']) }
+      : {}),
     ...(typeof lastError === 'object' && lastError !== null
       ? { lastError: lastError as { code: string; message?: string } }
       : {}),
   }
+}
+
+function parseLocalRelay(value: unknown): { lanUrl: string; port: number } {
+  const record = value as Record<string, unknown>
+  if (typeof record['lanUrl'] !== 'string' || typeof record['port'] !== 'number') {
+    throw new ConsoleApiError('response', '本机服务返回异常响应')
+  }
+  return { lanUrl: record['lanUrl'], port: record['port'] }
+}
+
+/** Start (or restart) the built-in LAN relay and switch the Host onto it. */
+export async function startLocalRelay(port?: number): Promise<{ lanUrl: string; port: number }> {
+  return await request('/api/web-remote/local', (value) => {
+    const relay = (value as { localRelay?: unknown } | null)?.localRelay
+    return parseLocalRelay(relay)
+  }, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(port === undefined ? {} : { port }),
+  })
 }
 
 function parsePairing(value: unknown): ConsolePairing {

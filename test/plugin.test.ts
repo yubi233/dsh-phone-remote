@@ -179,6 +179,53 @@ describe('web-remote-host start retry', () => {
   })
 })
 
+describe('web-remote-host built-in LAN relay', () => {
+  it('auto-starts a LAN relay when no external relay is configured', async () => {
+    const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const shellDir = mkdtempSync(join(tmpdir(), 'dsh-local-mode-'))
+    writeFileSync(join(shellDir, 'index.html'), '<!doctype html><title>phone</title>')
+    const storeFile = join(shellDir, 'relay.json')
+    const { ctx, provided, effects } = makeContext()
+    try {
+      const { hostId: _hostId, hostSecret: _hostSecret, relayHttpUrl: _relay, ...fresh } = config
+      void _hostId
+      void _hostSecret
+      void _relay
+      await apply(ctx, {
+        ...fresh,
+        localRelay: { port: 0, shellDir, storeFile },
+      })
+      const service = provided.get('webRemoteHost') as WebRemoteHostService
+      const info = service.consoleInfo()
+      expect(info.configured).toBe(true)
+      expect(info.localRelay).toBeDefined()
+      expect(info.localRelay?.lanUrl).toMatch(/^http:\/\/\d+\.\d+\.\d+\.\d+:\d+$/)
+
+      // The Host registers and connects to the embedded relay for real.
+      await service.start()
+      expect(service.status).toBe('online')
+      const pairing = await service.createPairing()
+      expect(pairing.url).toBeDefined()
+      expect(pairing.url?.startsWith(info.localRelay?.lanUrl ?? '')).toBe(true)
+
+      // The runtime config keeps the identity but marks local mode.
+      const stored = await new (await import('../src/relay-config.ts')).RelayConfigStore(
+        (ctx as { storageDomain: WebRemotePluginContext['storageDomain'] }).storageDomain,
+      ).load()
+      expect(stored?.localRelay).toBeDefined()
+      expect(stored?.relayHttpUrl).toBeUndefined()
+    } finally {
+      // Run one effect callback and its cleanup: this closes the embedded relay.
+      const cleanup = effects[0]?.() as (() => unknown) | undefined
+      if (typeof cleanup === 'function') cleanup()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      rmSync(shellDir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('web-remote-host console setup', () => {
   function makeWebServerContext(): FakeContext & { webServerRoutes: { kind: string; path: string }[] } {
     const base = makeContext()
@@ -215,7 +262,7 @@ describe('web-remote-host console setup', () => {
 
   it('activates unconfigured without a relay URL and skips autoStart', async () => {
     const { ctx, provided, effects } = makeContext()
-    await apply(ctx, { ...config, relayHttpUrl: undefined })
+    await apply(ctx, { ...config, relayHttpUrl: undefined, localRelay: false })
     const service = provided.get('webRemoteHost') as WebRemoteHostService
     expect(service.configured).toBe(false)
     expect(service.status).toBe('unconfigured')
@@ -245,6 +292,7 @@ describe('web-remote-host console setup', () => {
     void _relay
     await apply(ctx, {
       ...fresh,
+      localRelay: false,
       fetchImpl: registerFetch({ ok: true }, calls),
       createSocket: pendingSocket,
     })
@@ -285,6 +333,7 @@ describe('web-remote-host console setup', () => {
     await apply(ctx, {
       ...config,
       relayHttpUrl: undefined,
+      localRelay: false,
       fetchImpl: registerFetch({ ok: false, status: 401 }, calls),
     })
     const service = provided.get('webRemoteHost') as WebRemoteHostService
@@ -297,7 +346,7 @@ describe('web-remote-host console setup', () => {
     expect(service.status).toBe('unconfigured')
 
     // Nothing was persisted: a later boot stays unconfigured.
-    await apply(ctx, { ...config, relayHttpUrl: undefined })
+    await apply(ctx, { ...config, relayHttpUrl: undefined, localRelay: false })
     const service2 = provided.get('webRemoteHost') as WebRemoteHostService
     expect(service2.configured).toBe(false)
   })

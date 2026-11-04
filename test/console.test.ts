@@ -167,6 +167,57 @@ describe('relay console routes', () => {
   })
 })
 
+describe('console local relay route', () => {
+  it('starts the built-in relay and returns its LAN URL', async () => {
+    const captured = captureServer()
+    const start = vi.fn().mockResolvedValue({ lanUrl: 'http://192.168.1.5:8787', port: 8787 })
+    registerRelayConsole(captured.server, {
+      service: fakeService(),
+      localRelay: { start, enabled: true },
+    })
+    const started = await serveHandler(captured.route().handler)
+    stop = started.close
+
+    const response = await fetch(`${started.url}/api/web-remote/local`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 9000 }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      ok: true,
+      localRelay: { lanUrl: 'http://192.168.1.5:8787', port: 8787 },
+    })
+    expect(start).toHaveBeenCalledWith(9000)
+  })
+
+  it('rejects a disabled relay and an invalid port', async () => {
+    const captured = captureServer()
+    registerRelayConsole(captured.server, { service: fakeService() })
+    const started = await serveHandler(captured.route().handler)
+    stop = started.close
+
+    const disabled = await fetch(`${started.url}/api/web-remote/local`, { method: 'POST' })
+    expect(disabled.status).toBe(409)
+    expect(await disabled.json()).toMatchObject({ error: { code: 'NOT_SUPPORTED' } })
+
+    const enabledCaptured = captureServer()
+    registerRelayConsole(enabledCaptured.server, {
+      service: fakeService(),
+      localRelay: { start: vi.fn().mockResolvedValue({ lanUrl: 'http://x:1', port: 1 }), enabled: true },
+    })
+    const enabledStarted = await serveHandler(enabledCaptured.route().handler)
+    await stop?.()
+    stop = enabledStarted.close
+    const badPort = await fetch(`${enabledStarted.url}/api/web-remote/local`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ port: 70000 }),
+    })
+    expect(badPort.status).toBe(400)
+  })
+})
+
 describe('console trust fence', () => {
   function fakeRequest(address: string, headers: Record<string, string>): IncomingMessage {
     return { socket: { remoteAddress: address }, headers } as unknown as IncomingMessage

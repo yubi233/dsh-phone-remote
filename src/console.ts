@@ -38,6 +38,8 @@ export interface RelayConsoleInfo {
   relayHttpUrl?: string
   hostId?: string
   registrationTokenSet: boolean
+  /** Present while the built-in LAN relay is serving the phone shell. */
+  localRelay?: { lanUrl: string; port: number }
   lastError?: { code: string; message?: string }
 }
 
@@ -64,6 +66,13 @@ export interface RelayConsoleService {
 
 export interface RelayConsoleOptions {
   readonly service: RelayConsoleService
+  /** Built-in LAN relay controls; omitted when the deployment disables it. */
+  readonly localRelay?: {
+    /** Switch to the built-in relay (stopping any external one); returns its info. */
+    start(port?: number): Promise<{ lanUrl: string; port: number }>
+    /** Whether local mode is allowed at all. */
+    enabled: boolean
+  }
   readonly logger?: {
     info?(message: string): void
     warn?(message: string): void
@@ -121,6 +130,18 @@ async function handleConsoleRequest(
           error instanceof Error ? error.message : String(error),
         )
       }
+      return
+    }
+
+    if (method === 'POST' && path === '/api/web-remote/local') {
+      const local = options.localRelay
+      if (local === undefined || !local.enabled) {
+        throw new ConsoleError(409, 'NOT_SUPPORTED', 'built-in LAN relay is disabled on this deployment')
+      }
+      const body = await readOptionalJsonBody(req)
+      const port = parseOptionalPort(body)
+      const info = await local.start(port)
+      writeJson(res, 200, { ok: true, localRelay: { lanUrl: info.lanUrl, port: info.port } })
       return
     }
 
@@ -207,6 +228,26 @@ export class ConsoleError extends Error {
     super(message)
     this.name = 'ConsoleError'
   }
+}
+
+/** Read a JSON body when one was sent; an empty body is allowed. */
+async function readOptionalJsonBody(req: IncomingMessage): Promise<unknown> {
+  const declared = req.headers['content-length']
+  if (declared === undefined && req.headers['transfer-encoding'] === undefined) return undefined
+  return await readJsonBody(req)
+}
+
+function parseOptionalPort(body: unknown): number | undefined {
+  if (body === undefined) return undefined
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    throw new ConsoleError(400, 'WRONG_PARAM', 'local relay body must be an object')
+  }
+  const port = (body as Record<string, unknown>)['port']
+  if (port === undefined) return undefined
+  if (!Number.isSafeInteger(port) || (port as number) < 0 || (port as number) > 65535) {
+    throw new ConsoleError(400, 'WRONG_PARAM', 'port must be an integer between 0 and 65535')
+  }
+  return port as number
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {

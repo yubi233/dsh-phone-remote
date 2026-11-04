@@ -1,0 +1,18 @@
+{
+  "name": "@dsh-web-remote/relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Stateless relay for dsh-phone-remote: host registration, device pairing, WebSocket forwarding, static phone-shell hosting",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@dsh-web-remote/protocol": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.0",
+    "vitest": "^2.1.0"
+  }
+}

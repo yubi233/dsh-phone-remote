@@ -15,6 +15,9 @@ importers:
       '@dsh-web-remote/protocol':
         specifier: workspace:*
         version: link:packages/protocol
+      '@dsh-web-remote/relay':
+        specifier: workspace:*
+        version: link:packages/relay
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.5
@@ -50,6 +53,22 @@ importers:
         version: 2.1.0(@types/node@22.20.5)
 
   packages/protocol: {}
+
+  packages/relay:
+    dependencies:
+      '@dsh-web-remote/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      ws:
+        specifier: ^8.18.0
+        version: 8.22.1
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.0
+        version: 8.18.2
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.0(@types/node@22.20.5)
 
 packages:
 

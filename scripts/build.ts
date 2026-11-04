@@ -10,8 +10,10 @@
  *   external: the shell serves them from its frozen module table.
  */
 
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, copyFileSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { build } from 'esbuild'
+import { fileURLToPath } from 'node:url'
 
 const manifestPath = new URL('../package.json', import.meta.url)
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { name: string }
@@ -60,4 +62,36 @@ await build({
   logLevel: 'warning',
 })
 
+// Ship the built phone shell so the built-in LAN relay can serve it without
+// any separate deployment: the plugin package is the whole setup.
+const shellSource = fileURLToPath(new URL('../../../apps/mobile-web', import.meta.url))
+const shellTarget = fileURLToPath(new URL('../shell', import.meta.url))
+if (existsSync(join(shellSource, 'index.html'))) {
+  rmSync(shellTarget, { recursive: true, force: true })
+  mkdirSync(shellTarget, { recursive: true })
+  copyFileSync(join(shellSource, 'index.html'), join(shellTarget, 'index.html'))
+  const loginPage = join(shellSource, 'login.html')
+  if (existsSync(loginPage)) copyFileSync(loginPage, join(shellTarget, 'login.html'))
+  copyDir(join(shellSource, 'dist'), join(shellTarget, 'dist'))
+  console.log(`host-plugin: copied phone shell from ${shellSource}`)
+} else if (existsSync(join(shellTarget, 'index.html'))) {
+  console.log('host-plugin: using the prebuilt phone shell committed in shell/')
+} else {
+  console.warn(`host-plugin: no phone shell at ${shellSource}; run the mobile-web build first`)
+}
+
 console.log('host-plugin: built lib/index.js and lib/client.js')
+
+/** Copy a directory tree without source maps (they double the package size). */
+function copyDir(source: string, target: string): void {
+  mkdirSync(target, { recursive: true })
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    const from = join(source, entry.name)
+    const to = join(target, entry.name)
+    if (entry.isDirectory()) {
+      copyDir(from, to)
+    } else if (!entry.name.endsWith('.map')) {
+      copyFileSync(from, to)
+    }
+  }
+}

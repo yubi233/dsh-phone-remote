@@ -9,8 +9,10 @@ import type { SchemaLike } from './unread.ts'
  * credential and must be kept verbatim; the relay only ever sees its hash.
  */
 export interface RelayRuntimeConfig {
-  /** Relay HTTP origin, for example `https://relay.example`. */
-  relayHttpUrl: string
+  /** Relay HTTP origin, for example `https://relay.example`. Absent in local mode. */
+  relayHttpUrl?: string
+  /** Built-in LAN relay marker: its preferred port. Mutually exclusive with relayHttpUrl. */
+  localRelay?: { port?: number }
   /** Stable Host identity; generated on first setup and kept afterwards. */
   hostId: string
   /** Long-lived registration secret; generated on first setup. */
@@ -45,8 +47,14 @@ const relayConfigSchema: SchemaLike<RelayRuntimeConfig> = {
       throw new Error('relay config must be an object')
     }
     const record = value as Record<string, unknown>
+    const relayHttpUrl = optionalStringOf(record['relayHttpUrl'], 'relayHttpUrl')
+    const localRelay = optionalLocalRelay(record['localRelay'])
+    if (relayHttpUrl === undefined && localRelay === undefined) {
+      throw new Error('relay config needs relayHttpUrl or localRelay')
+    }
     return {
-      relayHttpUrl: requireString(record['relayHttpUrl'], 'relayHttpUrl'),
+      ...(relayHttpUrl === undefined ? {} : { relayHttpUrl }),
+      ...(localRelay === undefined ? {} : { localRelay }),
       hostId: requireString(record['hostId'], 'hostId'),
       hostSecret: requireString(record['hostSecret'], 'hostSecret'),
       ...optionalString(record['registrationToken'], 'registrationToken'),
@@ -141,6 +149,25 @@ export function normalizeRelayHttpUrl(value: string): string {
     throw new Error(`relayHttpUrl must be an absolute http(s) URL, got ${parsed.protocol}`)
   }
   return trimmed
+}
+
+function optionalStringOf(value: unknown, field: string): string | undefined {
+  if (value === undefined) return undefined
+  return requireString(value, field)
+}
+
+function optionalLocalRelay(value: unknown): { port?: number } | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('relay config localRelay must be an object')
+  }
+  const record = value as Record<string, unknown>
+  const port = record['port']
+  if (port === undefined) return {}
+  if (!Number.isSafeInteger(port) || (port as number) < 0 || (port as number) > 65535) {
+    throw new Error('relay config localRelay.port must be an integer between 0 and 65535')
+  }
+  return { port: port as number }
 }
 
 function requireString(value: unknown, field: string): string {

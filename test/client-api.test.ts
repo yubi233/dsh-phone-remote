@@ -6,6 +6,7 @@ import {
   fetchConsoleStatus,
   revokeConsoleDevice,
   setupRelay,
+  startLocalRelay,
 } from '../src/client/api.ts'
 import { ConsoleApiError } from '../src/client/api.ts'
 
@@ -138,5 +139,35 @@ describe('console api client', () => {
     expect(describeApiError(new ConsoleApiError('network', '无法访问本机服务'))).toBe(
       '无法访问本机服务',
     )
+  })
+})
+
+
+describe('local relay client', () => {
+  it('parses localRelay in status', async () => {
+    stubJson({
+      status: 200,
+      body: {
+        configured: true,
+        state: 'online',
+        hostName: 'my-mac',
+        registrationTokenSet: false,
+        localRelay: { lanUrl: 'http://192.168.1.5:8787', port: 8787 },
+      },
+    })
+    const status = await fetchConsoleStatus()
+    expect(status.localRelay).toEqual({ lanUrl: 'http://192.168.1.5:8787', port: 8787 })
+  })
+
+  it('posts the local relay switch and returns the LAN URL', async () => {
+    let capturedBody: unknown
+    const fetchStub = async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      capturedBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ ok: true, localRelay: { lanUrl: 'http://192.168.1.5:8787', port: 8787 } }), { status: 200 })
+    }
+    vi.stubGlobal('fetch', fetchStub)
+    const info = await startLocalRelay(8787)
+    expect(capturedBody).toEqual({ port: 8787 })
+    expect(info).toEqual({ lanUrl: 'http://192.168.1.5:8787', port: 8787 })
   })
 })

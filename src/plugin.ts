@@ -19,6 +19,10 @@ import type { SessionUnreadContext } from './unread.ts'
 import { PairingClient } from './pairing.ts'
 import { generateHostIdentity, normalizeRelayHttpUrl, RelayConfigStore } from './relay-config.ts'
 import type { RelayRuntimeConfig } from './relay-config.ts'
+import { DEFAULT_LOCAL_RELAY_PORT, LocalRelay } from './local-relay.ts'
+import type { LocalRelayInfo } from './local-relay.ts'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { HostRemote } from './remote.ts'
 import type { HostRemoteConfig, HostRemoteState } from './remote.ts'
 import type { HostBridge } from './bridge.ts'
@@ -48,6 +52,24 @@ export interface WebRemotePluginConfig {
   capabilities?: string[]
   /** Soft byte budget for one opening snapshot or history page; defaults to 200000. */
   bodyBudgetBytes?: number
+  /**
+   * Built-in LAN relay. Enabled by default whenever no external relay is
+   * configured: the plugin hosts the relay and the bundled phone shell itself
+   * and the panel shows one LAN URL. `false` disables it; an object tunes the
+   * port or points the shell at another directory (tests).
+   */
+  localRelay?:
+    | false
+    | {
+        /** Preferred LAN port; defaults to 8787, falls back to ephemeral when busy. */
+        port?: number
+        /** Phone shell directory; defaults to the package's `shell/`. */
+        shellDir?: string
+        /** Relay state file; defaults to `~/.dsh/storages/web_remote_local_relay.json`. */
+        storeFile?: string
+        /** Bind interface; defaults to `0.0.0.0` so LAN phones can reach it. */
+        host?: string
+      }
   /** Start the relay connection immediately; defaults to true. */
   autoStart?: boolean
   /** Fetch implementation for relay HTTP calls; tests inject a stub. */
@@ -127,6 +149,7 @@ export class WebRemoteHostService {
   readonly #logger: WebRemotePluginContext['logger']
   #remote: HostRemote | undefined
   #active: { relayHttpUrl: string; hostId: string; registrationTokenSet: boolean } | undefined
+  #local: LocalRelayInfo | undefined
   #started = false
 
   constructor(
@@ -209,8 +232,44 @@ export class WebRemoteHostService {
       hostName: this.#config.hostName,
       registrationTokenSet: active?.registrationTokenSet === true,
       ...(active === undefined ? {} : { relayHttpUrl: active.relayHttpUrl, hostId: active.hostId }),
+      ...(this.#local === undefined
+        ? {}
+        : { localRelay: { lanUrl: this.#local.lanUrl, port: this.#local.port } }),
       ...(this.lastError === undefined ? {} : { lastError: this.lastError }),
     }
+  }
+
+  /**
+   * Attach a freshly started built-in LAN relay: the Host connects over
+   * loopback while pairing URLs point at the LAN origin a phone can open.
+   * Registration is not probed here — the relay was just created by this
+   * process, so only a bind-level failure could stop it.
+   */
+  attachLocalRelay(info: LocalRelayInfo): void {
+    const hooks = this.#hooks
+    if (hooks === undefined) {
+      throw new Error('web-remote-host: runtime relay setup is not available in this deployment')
+    }
+    const identity = hooks.identity()
+    const config = this.#config
+    this.#local = info
+    this.#attachRemote({
+      relayHttpUrl: info.internalHttpUrl,
+      relayWsUrl: deriveRelayWsUrl(info.internalHttpUrl),
+      hostId: identity.hostId,
+      hostSecret: identity.hostSecret,
+      hostName: identity.hostName,
+      pairingUrlBase: info.lanUrl,
+      ...(config.hostVersion === undefined ? {} : { hostVersion: config.hostVersion }),
+      ...(config.capabilities === undefined ? {} : { capabilities: config.capabilities }),
+      ...(config.fetchImpl === undefined ? {} : { fetchImpl: config.fetchImpl }),
+      ...(config.createSocket === undefined ? {} : { createSocket: config.createSocket }),
+    })
+  }
+
+  /** Stop the Host connection but keep the local relay marker for the panel. */
+  detachLocalRelay(): void {
+    this.#local = undefined
   }
 
   /**
@@ -262,6 +321,7 @@ export class WebRemoteHostService {
       ...(registrationToken === undefined ? {} : { registrationToken }),
     }
     const previous = this.#remote
+    this.#local = undefined
     this.#attachRemote(remoteConfig)
     const current = this.#remote
     if (current !== undefined) {
@@ -390,32 +450,86 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
   const stored = await configStore.load()
   const effective = mergeRuntimeConfig(normalized, stored)
   const identityMemo: { identity?: { hostId: string; hostSecret: string } } = {}
+  const identityOf = (): { hostId: string; hostSecret: string; hostName: string } => {
+    if (identityMemo.identity === undefined) {
+      identityMemo.identity =
+        effective.hostId !== undefined && effective.hostSecret !== undefined
+          ? { hostId: effective.hostId, hostSecret: effective.hostSecret }
+          : generateHostIdentity()
+    }
+    return { ...identityMemo.identity, hostName: effective.hostName }
+  }
+  const persistRuntime = async (runtime: RelayRuntimeConfig): Promise<void> => {
+    await configStore.save(runtime)
+  }
   const service = new WebRemoteHostService(
     effective,
     ctx,
     unread,
     workspaceChanges,
-    {
-      identity: () => {
-        if (identityMemo.identity === undefined) {
-          identityMemo.identity =
-            effective.hostId !== undefined && effective.hostSecret !== undefined
-              ? { hostId: effective.hostId, hostSecret: effective.hostSecret }
-              : generateHostIdentity()
-        }
-        return { ...identityMemo.identity, hostName: effective.hostName }
-      },
-      persist: async (runtime) => {
-        await configStore.save(runtime)
-      },
-    },
+    { identity: identityOf, persist: persistRuntime },
   )
+
+  // Built-in LAN relay: no external relay configured means "host it here".
+  // Anyone who installs the plugin gets a LAN URL for the phone without any
+  // further setup; the panel shows it and can switch modes at runtime.
+  const localRelayOptions = typeof effective.localRelay === 'object' ? effective.localRelay : {}
+  let localRelay: LocalRelay | undefined
+  const startLocalRelay = async (preferredPort?: number): Promise<LocalRelayInfo> => {
+    await localRelay?.close().catch(() => undefined)
+    const next = new LocalRelay({
+      port: preferredPort ?? localRelayOptions.port ?? DEFAULT_LOCAL_RELAY_PORT,
+      ...(localRelayOptions.host === undefined ? {} : { host: localRelayOptions.host }),
+      ...(localRelayOptions.shellDir === undefined ? {} : { shellDir: localRelayOptions.shellDir }),
+      storeFile: localRelayOptions.storeFile ?? defaultLocalStoreFile(),
+    })
+    const info = await next.start()
+    localRelay = next
+    return info
+  }
+  if (effective.relayHttpUrl === undefined && effective.localRelay !== false) {
+    try {
+      const info = await startLocalRelay()
+      service.attachLocalRelay(info)
+      const identity = identityOf()
+      await persistRuntime({
+        hostId: identity.hostId,
+        hostSecret: identity.hostSecret,
+        localRelay: { port: info.port },
+      })
+      ctx.logger?.info?.(`web-remote-host: built-in LAN relay at ${info.lanUrl}`)
+    } catch (error: unknown) {
+      // A missing shell build or a busy network is a UI-level problem, not an
+      // activation failure: the panel stays available and reports the reason.
+      reportStartFailure(ctx, `built-in LAN relay unavailable (${messageOf(error)})`)
+    }
+  }
+  const switchToLocalRelay = async (port?: number): Promise<LocalRelayInfo> => {
+    await service.stop()
+    const info = await startLocalRelay(port)
+    service.attachLocalRelay(info)
+    const identity = identityOf()
+    await persistRuntime({
+      hostId: identity.hostId,
+      hostSecret: identity.hostSecret,
+      localRelay: { port: info.port },
+    })
+    await service.start().catch((error: unknown) => {
+      reportStartFailure(ctx, `built-in LAN relay connect failed (${messageOf(error)})`)
+    })
+    return info
+  }
+
   ctx.provide?.('webRemoteHost', service)
   const webServer = resolveWebServer(ctx)
   if (webServer !== undefined) {
     registerRelayConsole(webServer, {
       service,
       ...(ctx.logger === undefined ? {} : { logger: ctx.logger }),
+      localRelay: {
+        start: switchToLocalRelay,
+        enabled: effective.localRelay !== false,
+      },
     })
   }
   let disposed = false
@@ -424,6 +538,7 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
     return () => {
       disposed = true
       void service.stop()
+      void localRelay?.close().catch(() => undefined)
       void configStore.close().catch(() => undefined)
       void unread.close()
     }
@@ -459,9 +574,12 @@ function mergeRuntimeConfig(
   if (stored === undefined) return config
   return {
     ...config,
-    relayHttpUrl: stored.relayHttpUrl,
+    ...(stored.relayHttpUrl === undefined ? {} : { relayHttpUrl: stored.relayHttpUrl }),
     hostId: stored.hostId,
     hostSecret: stored.hostSecret,
+    ...(stored.localRelay === undefined
+      ? {}
+      : { localRelay: { ...(stored.localRelay.port === undefined ? {} : { port: stored.localRelay.port }) } }),
     ...(stored.pairingUrlBase === undefined ? {} : { pairingUrlBase: stored.pairingUrlBase }),
     ...(stored.registrationToken === undefined ? {} : { registrationToken: stored.registrationToken }),
   }
@@ -533,6 +651,11 @@ function resolveWorkspaceChanges(ctx: WebRemotePluginContext): WorkspaceChangesL
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Relay state file for the built-in LAN relay, next to other DSH state. */
+function defaultLocalStoreFile(): string {
+  return join(homedir(), '.dsh', 'storages', 'web_remote_local_relay.json')
 }
 
 /** Host name used when the patch config does not name one. */

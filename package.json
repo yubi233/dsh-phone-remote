@@ -1,18 +1,15 @@
 {
   "name": "dsh-phone-remote",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "type": "module",
-  "description": "Host-side dsh plugin: pair a phone to your dsh instance through a self-hosted relay, with a console inside the dsh web GUI",
+  "description": "DSH Host side of dsh-web-remote: relay transport, pairing, RPC bridge, stream replay, and the web GUI console",
   "license": "MIT",
   "exports": {
     ".": "./lib/index.js",
     "./client": "./lib/client.js"
   },
   "scripts": {
-    "build": "tsx scripts/build.ts",
-    "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "prepack": "pnpm build"
+    "build": "tsx scripts/build.ts"
   },
   "dsh": {
     "engines": {
@@ -27,6 +24,7 @@
   },
   "files": [
     "lib",
+    "shell",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
@@ -46,6 +44,7 @@
     "react-dom": "^18.2.0",
     "tsx": "^4.23.15",
     "typescript": "^5.7.2",
+    "@dsh-web-remote/relay": "workspace:*",
     "vitest": "^2.1.0"
   },
   "engines": {

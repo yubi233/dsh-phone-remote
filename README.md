@@ -1,9 +1,8 @@
 # dsh-phone-remote
 
-Host-side plugin that pairs a phone to a DeepSeek Harness (`dsh`) instance through a self-hosted relay. One outbound connection from the
-Host carries the session list, streaming chat, approvals, attachments and file
-previews to a dedicated mobile web shell; the phone never needs an inbound port
-on the Host machine.
+[dsh-web-remote](https://github.com/) 的 DSH Host 插件：把一台运行 [DeepSeek
+Harness](https://github.com/) 的电脑接入中继（relay），让手机通过专用移动壳远程
+使用它——会话列表、流式对话、审批、附件、终端、文件浏览，全部经中继转发。
 
 一个包，两个半区：
 
@@ -22,37 +21,41 @@ dsh plugin --profile web add dsh-phone-remote
 
 重启 profile（`dsh web`），侧栏底部出现 📱 图标即安装成功。
 
-## 前置：一个 relay
+## 用法：装完即用（局域网模式，默认）
 
-本包是 Host 半区；手机壳与 relay 服务需要单独部署（协议见本仓库 `src/` 与
-`packages/protocol`）。relay 的最小环境变量：
+**不需要单独部署任何东西。** 插件内置 relay 与手机壳静态页：安装后自动在本机
+启动中继（默认端口 8787，被占用时自动换端口），监听局域网。
+
+1. 打开 DSH 网页，侧栏点 📱。面板状态卡直接显示**局域网地址**，例如
+   `http://192.168.1.23:8787`。
+2. 手机连同一个 Wi-Fi，打开该地址即可使用；或点「配对手机」扫码；把地址发给
+   别人也行。
+3. 已配对设备可在面板里随时撤销。
+
+Host 进程重启后自动恢复本地中继；设备配对记录持久化在
+`~/.dsh/storages/web_remote_local_relay.json`。
+
+## 可选：接入外部 relay（服务器模式）
+
+要让手机在局域网外也能访问（例如公网 VPS），在面板「中继服务器」里填外部
+relay 地址与注册令牌 →「保存并连接」；随时可点「使用局域网模式」切回。
+外部 relay 的最小环境变量：
 
 | 变量 | 作用 |
 |---|---|
-| `HOST` / `PORT` | 监听地址（公网部署必须前置 TLS，例如 Caddy） |
+| `HOST` / `PORT` | 监听地址（公网部署必须前置 TLS） |
 | `RELAY_REGISTRATION_TOKEN` | 注册本插件的共享密钥（公网必设） |
-| `RELAY_TRUST_PROXY=1` | 在反向代理后按真实客户端 IP 限速 |
-| `RELAY_STORE_FILE` | 配对与令牌持久化，重启不丢设备 |
-| `RELAY_STATIC_DIR` | 可选：由 relay 直接托管手机壳静态页 |
-
-## 配对（服务器模式）
-
-1. 在 DSH 网页里点 📱 → 「中继服务器」→ 填 relay 地址与注册令牌 →
-   「保存并连接」。身份（hostId/hostSecret）首次自动生成并存入 storage domain，
-   重启后保留。
-2. 点「配对手机」生成一次性二维码（5 分钟有效、一次性、可随时重新生成），
-   手机扫码打开手机壳页即完成配对。
-3. 在「已配对设备」里随时撤销设备。
-
-局域网模式相同：relay 跑在本机、中继地址填局域网地址即可。
+| `RELAY_TRUST_PROXY=1` | 反向代理后按真实客户端 IP 限速 |
+| `RELAY_STORE_FILE` | 配对与令牌持久化 |
+| `RELAY_STATIC_DIR` | 可选：托管手机壳静态页（本包 `shell/` 目录） |
 
 ## 从部署配置固定（可选）
 
-不想用面板配置时，在 patch 行里带 config（面板修改会覆盖这里的值）：
+不想用面板配置时，在 patch 行里带 config（此时面板修改会覆盖这里的值）：
 
 ```yaml
 - insert:
-    - id: dsh-phone-remote
+    - id: web-remote-host
       name: 'dsh-phone-remote'
       config:
         relayHttpUrl: https://relay.example.com
@@ -61,18 +64,6 @@ dsh plugin --profile web add dsh-phone-remote
         hostName: my-mac
         registrationToken: <RELAY_REGISTRATION_TOKEN>
 ```
-
-## 开发
-
-```sh
-pnpm install
-pnpm test        # 122 个单测
-pnpm typecheck
-pnpm build       # 产出 lib/index.js + lib/client.js
-```
-
-`packages/protocol` 是跨 relay/插件/手机壳的线上类型与编解码，构建时内联进
-`lib/index.js`，不单独发布。
 
 ## 安全模型
 
@@ -84,5 +75,5 @@ pnpm build       # 产出 lib/index.js + lib/client.js
 
 ## 已知限制
 
-- relay 与手机壳的部署（含 HTTPS、登录门）不在本包内。
+- 手机壳与 relay 的部署（含 HTTPS、登录门）不在本包内，见仓库 `deploy/README.md`。
 - 审批/提问按 Session 路由；Host 进程重启后等待中的旧审批不可回答。

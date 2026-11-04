@@ -19,6 +19,7 @@ import {
   fetchConsoleStatus,
   revokeConsoleDevice,
   setupRelay,
+  startLocalRelay,
 } from './api.ts'
 import type { ConsoleDevice, ConsolePairing, ConsoleStatus } from './api.ts'
 
@@ -141,7 +142,15 @@ function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void }): Re
         </span>
       </div>
       <div style={mutedStyle}>主机：{state.hostName}</div>
-      {state.relayHttpUrl !== undefined ? <div style={mutedStyle}>中继：{state.relayHttpUrl}</div> : null}
+      {state.localRelay !== undefined ? (
+        <div style={lanUrlBoxStyle}>
+          <div style={mutedStyle}>手机连同一 Wi-Fi，打开这个地址即可使用：</div>
+          <code style={lanUrlStyle}>{state.localRelay.lanUrl}</code>
+        </div>
+      ) : null}
+      {state.localRelay === undefined && state.relayHttpUrl !== undefined ? (
+        <div style={mutedStyle}>中继：{state.relayHttpUrl}</div>
+      ) : null}
       {state.lastError !== undefined ? (
         <div style={errorStyle}>
           最近错误：{state.lastError.message ?? state.lastError.code}
@@ -182,6 +191,21 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
     }
   }
 
+  const useLocal = async (): Promise<void> => {
+    setBusy(true)
+    setError(undefined)
+    setMessage(undefined)
+    try {
+      const info = await startLocalRelay()
+      setMessage(`已切换到局域网模式：${info.lanUrl}`)
+      props.onConfigured()
+    } catch (caught) {
+      setError(describeApiError(caught))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section style={cardStyle}>
       <strong>中继服务器</strong>
@@ -204,10 +228,15 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
           onChange={(event) => setToken(event.target.value)}
         />
       </label>
-      <div>
+      <div style={rowStyle}>
         <button type="button" style={primaryButtonStyle} disabled={busy || relayUrl.trim() === ''} onClick={() => void submit()}>
           {busy ? '连接中…' : '保存并连接'}
         </button>
+        {props.status.localRelay === undefined ? (
+          <button type="button" style={ghostButtonStyle} disabled={busy} onClick={() => void useLocal()}>
+            使用局域网模式
+          </button>
+        ) : null}
       </div>
       {message !== undefined ? <div style={okStyle}>{message}</div> : null}
       {error !== undefined ? <div style={errorStyle}>{error}</div> : null}
@@ -258,7 +287,7 @@ function PairingCard(): ReactNode {
           <div style={mutedStyle}>
             {pairing.url === undefined
               ? '未配置配对页地址：请在手机浏览器打开手机页并输入配对码。'
-              : '用手机相机扫码打开配对链接。'}
+              : '用手机相机扫码，或把上面的局域网地址发给手机打开。'}
           </div>
           <div style={codeStyle}>
             配对码 <code>{pairingCodeGrouped(pairing.pairingCode)}</code>
@@ -446,6 +475,27 @@ const okStyle = {
 const codeStyle = {
   fontSize: '15px',
   letterSpacing: '1px',
+} as const
+
+const lanUrlBoxStyle = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '4px',
+  padding: '8px 10px',
+  borderRadius: '8px',
+  background: 'rgba(37, 99, 235, 0.08)',
+} as const
+
+const lanUrlStyle = {
+  fontSize: '15px',
+  wordBreak: 'break-all',
+} as const
+
+const rowStyle = {
+  display: 'flex',
+  gap: '8px',
+  alignItems: 'center',
+  flexWrap: 'wrap',
 } as const
 
 const qrWrapStyle = {

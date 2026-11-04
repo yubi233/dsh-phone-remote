@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>dsh remote · 离线</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --surface: #171a21;
+        --border: #2a2f3a;
+        --text: #e6e9ef;
+        --muted: #8b93a3;
+        --faint: #6b7383;
+        --accent: #4f8cff;
+        color-scheme: dark;
+        font-size: 15px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        display: grid;
+        min-height: 100dvh;
+        margin: 0;
+        padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px);
+        place-items: center;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        text-align: center;
+      }
+
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        max-width: 22rem;
+        padding: 28px 24px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
+      }
+
+      .mark {
+        display: grid;
+        width: 64px;
+        height: 64px;
+        place-items: center;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        color: var(--accent);
+        font-size: 28px;
+        line-height: 1;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .hint {
+        color: var(--faint);
+        font-size: 12px;
+      }
+
+      button {
+        width: 100%;
+        min-height: 44px;
+        margin-top: 4px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+      }
+
+      button:active {
+        opacity: 0.85;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">◆</div>
+      <h1>当前处于离线状态</h1>
+      <p>dsh remote 需要连接 relay 才能加载会话。已缓存的界面壳仍可打开，联网后请重试。</p>
+      <button type="button" onclick="location.reload()">重新加载</button>
+      <p class="hint">如果从主屏启动，也可以返回桌面，等网络恢复后再打开。</p>
+    </main>
+  </body>
+</html>

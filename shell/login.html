@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="robots" content="noindex" />
+    <title>登录 · dsh remote</title>
+    <style>
+      :root {
+        --bg: #0f1115;
+        --surface: #171a21;
+        --surface-2: #1f232c;
+        --border: #2a2f3a;
+        --text: #e6e9ef;
+        --muted: #8b93a3;
+        --faint: #6b7383;
+        --accent: #4f8cff;
+        --accent-strong: #3b74e0;
+        --danger: #f85149;
+        color-scheme: dark;
+        font-size: 15px;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f5f7fb;
+          --surface: #ffffff;
+          --surface-2: #f0f3f8;
+          --border: #d8dee9;
+          --text: #1a1f29;
+          --muted: #5c6675;
+          --faint: #7c8595;
+          --accent: #2563eb;
+          --accent-strong: #1d4ed8;
+          --danger: #cf222e;
+          color-scheme: light;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+          "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        display: flex;
+        flex-direction: column;
+        min-height: 100dvh;
+        padding: calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 16px);
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 40px;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--muted);
+      }
+      .brand-mark { color: var(--accent); }
+      .stage {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        width: min(100%, 340px);
+        margin: 0 auto;
+        padding-bottom: 64px;
+        text-align: center;
+      }
+      .tile {
+        display: grid;
+        place-items: center;
+        width: 64px;
+        height: 64px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: var(--surface);
+        font-size: 26px;
+      }
+      h1 { margin: 0; font-size: 22px; font-weight: 600; }
+      .hint { margin: 0; color: var(--muted); font-size: 14px; }
+      form { display: flex; flex-direction: column; gap: 12px; width: 100%; margin-top: 6px; }
+      input {
+        width: 100%;
+        min-height: 44px;
+        padding: 10px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-2);
+        color: var(--text);
+        font: inherit;
+        font-size: 16px;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+      button {
+        min-height: 44px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { background: var(--accent-strong); }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .error {
+        width: 100%;
+        margin: 0;
+        padding: 8px 10px;
+        border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--danger) 10%, transparent);
+        font-size: 13px;
+        text-align: center;
+      }
+      .note { margin: 4px 0 0; color: var(--faint); font-size: 12px; }
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-7px); }
+        40% { transform: translateX(6px); }
+        60% { transform: translateX(-4px); }
+        80% { transform: translateX(3px); }
+      }
+      .shake { animation: shake 0.35s ease-in-out; }
+      @media (prefers-reduced-motion: reduce) {
+        .shake { animation: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="brand"><span class="brand-mark" aria-hidden="true">◆</span><span>dsh remote</span></header>
+
+    <main class="stage">
+      <div class="tile" aria-hidden="true">🔒</div>
+      <h1>登录远程控制</h1>
+      <p class="hint" id="hint">请输入访问密码以继续。</p>
+
+      <form id="form" novalidate>
+        <label for="password" class="visually-hidden" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">访问密码</label>
+        <input
+          id="password"
+          name="password"
+          type="password"
+          autocomplete="current-password"
+          placeholder="访问密码"
+          required
+          autofocus
+        />
+        <button id="submit" type="submit" disabled>登录</button>
+      </form>
+
+      <p class="error" id="error" role="alert" hidden></p>
+      <p class="note">这是一台私人主机，仅限授权设备访问。</p>
+    </main>
+
+    <script>
+      (function () {
+        'use strict'
+
+        var form = document.getElementById('form')
+        var input = document.getElementById('password')
+        var button = document.getElementById('submit')
+        var errorBox = document.getElementById('error')
+        var hint = document.getElementById('hint')
+        var busy = false
+
+        /**
+         * Recover the originally requested URI from the raw query string.
+         *
+         * Caddy appends `?next=<raw uri>` without percent-encoding, so a target
+         * like `/?relay=…&host=…&token=…` keeps its own `&`. Slicing after the
+         * first `next=` therefore reconstructs it exactly; parsing with
+         * URLSearchParams would truncate at the first `&`.
+         */
+        function nextTarget() {
+          var raw = window.location.search
+          var marker = 'next='
+          var index = raw.indexOf(marker)
+          if (index < 0) return '/'
+          var target = raw.slice(index + marker.length)
+          if (target === '' || target.charAt(0) !== '/') return '/'
+          if (target.charAt(1) === '/' || target.charAt(1) === '\\') return '/'
+          if (target === '/login' || target.indexOf('/login?') === 0) return '/'
+          return target
+        }
+
+        function showError(message) {
+          errorBox.textContent = message
+          errorBox.hidden = false
+          form.classList.remove('shake')
+          // Force a reflow so the animation restarts on repeated failures.
+          void form.offsetWidth
+          form.classList.add('shake')
+        }
+
+        function setBusy(next) {
+          busy = next
+          button.disabled = next || input.value.trim() === ''
+          button.textContent = next ? '登录中…' : '登录'
+          input.disabled = next
+        }
+
+        input.addEventListener('input', function () {
+          if (!busy) button.disabled = input.value.trim() === ''
+          errorBox.hidden = true
+        })
+
+        form.addEventListener('submit', function (event) {
+          event.preventDefault()
+          if (busy) return
+          var password = input.value
+          if (password === '') return
+
+          setBusy(true)
+          errorBox.hidden = true
+          hint.hidden = true
+
+          fetch('/v1/auth/login', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ password: password }),
+          })
+            .then(function (response) {
+              if (response.ok) {
+                window.location.replace(nextTarget())
+                return
+              }
+              setBusy(false)
+              if (response.status === 429) {
+                showError('尝试过于频繁，请稍后再试')
+                return
+              }
+              if (response.status === 415) {
+                showError('请求被拒绝，请刷新页面重试')
+                return
+              }
+              showError('密码不正确')
+              input.select()
+            })
+            .catch(function () {
+              setBusy(false)
+              showError('网络异常，请稍后重试')
+            })
+        })
+
+        // Already authenticated (e.g. bookmark to /login): skip the form.
+        fetch('/v1/auth/verify', { credentials: 'same-origin' })
+          .then(function (response) {
+            if (response.status === 204) window.location.replace(nextTarget())
+          })
+          .catch(function () {
+            /* Offline: leave the form usable. */
+          })
+      })()
+    </script>
+  </body>
+</html>
