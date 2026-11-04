@@ -523,14 +523,18 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
   ctx.provide?.('webRemoteHost', service)
   const webServer = resolveWebServer(ctx)
   if (webServer !== undefined) {
-    registerRelayConsole(webServer, {
+    // Route registration lives on the fiber so a plugin reload unregisters the
+    // family before the next activation re-registers it (Cordis re-runs apply
+    // on reboots, and the desktop shell may activate a fresh install while the
+    // startup composition still holds one).
+    ctx.effect(() => registerRelayConsole(webServer, {
       service,
       ...(ctx.logger === undefined ? {} : { logger: ctx.logger }),
       localRelay: {
         start: switchToLocalRelay,
         enabled: effective.localRelay !== false,
       },
-    })
+    }))
   }
   let disposed = false
   ctx.effect(() => {

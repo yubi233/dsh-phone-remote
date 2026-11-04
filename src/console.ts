@@ -17,7 +17,7 @@ export interface RelayConsoleServer {
     kind: 'exact' | 'prefix'
     path: string
     handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
-  }): void
+  }): (() => void) | void
 }
 
 /** Relay setup input accepted from the console. */
@@ -88,13 +88,33 @@ const MAX_CONSOLE_BODY_BYTES = 64 * 1024
  *
  * One prefix route owns the whole family so exact API routes of the web app
  * are never shadowed and the fence applies uniformly.
+ *
+ * @returns the disposer removing the route again; the caller binds it to the
+ * plugin's effect lifetime so a reload re-registers cleanly.
  */
-export function registerRelayConsole(server: RelayConsoleServer, options: RelayConsoleOptions): void {
-  server.register({
-    kind: 'prefix',
-    path: '/api/web-remote',
-    handler: (req, res) => handleConsoleRequest(req, res, options),
-  })
+export function registerRelayConsole(
+  server: RelayConsoleServer,
+  options: RelayConsoleOptions,
+): () => void {
+  try {
+    const dispose = server.register({
+      kind: 'prefix',
+      path: '/api/web-remote',
+      handler: (req, res) => handleConsoleRequest(req, res, options),
+    })
+    return typeof dispose === 'function' ? dispose : () => undefined
+  } catch (error) {
+    // A second live instance (the desktop shell can activate a freshly
+    // installed plugin while the startup composition still holds one) must not
+    // fail the plugin: the first registration keeps serving the family.
+    if (error instanceof Error && error.message.includes('duplicate')) {
+      options.logger?.warn?.(
+        'web-remote-host: console routes are already registered by another instance; reusing them',
+      )
+      return () => undefined
+    }
+    throw error
+  }
 }
 
 async function handleConsoleRequest(

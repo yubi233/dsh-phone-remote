@@ -167,6 +167,46 @@ describe('relay console routes', () => {
   })
 })
 
+describe('console route lifecycle', () => {
+  it('returns the webserver disposer for the plugin to bind to its effect', () => {
+    const removed: string[] = []
+    const server: RelayConsoleServer = {
+      register: (route) => {
+        removed.push(route.path)
+        return () => removed.push(`remove:${route.path}`)
+      },
+    }
+    const dispose = registerRelayConsole(server, { service: fakeService() })
+    expect(removed).toEqual(['/api/web-remote'])
+    dispose()
+    expect(removed).toEqual(['/api/web-remote', 'remove:/api/web-remote'])
+  })
+
+  it('tolerates a duplicate registration from a second live instance', () => {
+    const server: RelayConsoleServer = {
+      register: () => {
+        throw new Error('webserver: duplicate prefix route "/api/web-remote"')
+      },
+    }
+    const warnings: string[] = []
+    const dispose = registerRelayConsole(server, {
+      service: fakeService(),
+      logger: { warn: (message: string) => warnings.push(message) },
+    })
+    expect(warnings.some((message) => message.includes('already registered'))).toBe(true)
+    expect(() => dispose()).not.toThrow()
+  })
+
+  it('rethrows non-duplicate registration failures', () => {
+    const server: RelayConsoleServer = {
+      register: () => {
+        throw new Error('unexpected failure')
+      },
+    }
+    expect(() => registerRelayConsole(server, { service: fakeService() })).toThrow('unexpected failure')
+  })
+})
+
 describe('console local relay route', () => {
   it('starts the built-in relay and returns its LAN URL', async () => {
     const captured = captureServer()

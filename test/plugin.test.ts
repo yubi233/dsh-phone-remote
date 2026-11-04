@@ -274,8 +274,11 @@ describe('web-remote-host console setup', () => {
   })
 
   it('registers the console route family when a webServer is mounted', async () => {
-    const { ctx, webServerRoutes } = makeWebServerContext()
+    const { ctx, webServerRoutes, effects } = makeWebServerContext()
     await apply(ctx, config)
+    // Cordis runs effect callbacks on activation; the fake context records
+    // them, so run them here to observe the registration.
+    for (const effect of effects) effect()
     expect(webServerRoutes).toEqual([{ kind: 'prefix', path: '/api/web-remote' }])
 
     const { ctx: plain } = makeContext()
