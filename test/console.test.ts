@@ -207,6 +207,32 @@ describe('console route lifecycle', () => {
   })
 })
 
+describe('console restart route', () => {
+  it('reconnects and reports the new state', async () => {
+    const captured = captureServer()
+    const restart = vi.fn().mockResolvedValue('online')
+    registerRelayConsole(captured.server, { service: fakeService(), restart })
+    const started = await serveHandler(captured.route().handler)
+    stop = started.close
+
+    const response = await fetch(`${started.url}/api/web-remote/restart`, { method: 'POST' })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true, state: 'online' })
+    expect(restart).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports 409 when restart is not wired', async () => {
+    const captured = captureServer()
+    registerRelayConsole(captured.server, { service: fakeService() })
+    const started = await serveHandler(captured.route().handler)
+    stop = started.close
+
+    const response = await fetch(`${started.url}/api/web-remote/restart`, { method: 'POST' })
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ error: { code: 'NOT_SUPPORTED' } })
+  })
+})
+
 describe('console local relay route', () => {
   it('starts the built-in relay and returns its LAN URL', async () => {
     const captured = captureServer()

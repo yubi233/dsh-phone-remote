@@ -437,6 +437,15 @@ export class WebRemoteHostService {
  * only covers the initial handshake.
  */
 export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePluginConfig): Promise<void> {
+  // The desktop shell can activate a fresh install while the startup
+  // composition still holds a previous instance. Two live instances would own
+  // two relays and the console would reach whichever registered first, so the
+  // newcomer stands down instead of half-working: the owning instance keeps
+  // serving and a full app restart hands over cleanly.
+  if (getProvidedService(ctx) !== undefined) {
+    reportStartFailure(ctx, 'another web-remote-host instance already owns this profile slot; standing down')
+    return
+  }
   // A published install needs no patch config at all: the relay is set up from
   // the DSH web GUI console and persisted in the storage domain.
   const normalized: WebRemotePluginConfig = {
@@ -475,6 +484,7 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
   // further setup; the panel shows it and can switch modes at runtime.
   const localRelayOptions = typeof effective.localRelay === 'object' ? effective.localRelay : {}
   let localRelay: LocalRelay | undefined
+  let liveLocalRelay: LocalRelayInfo | undefined
   const startLocalRelay = async (preferredPort?: number): Promise<LocalRelayInfo> => {
     await localRelay?.close().catch(() => undefined)
     const next = new LocalRelay({
@@ -485,6 +495,7 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
     })
     const info = await next.start()
     localRelay = next
+    liveLocalRelay = info
     return info
   }
   if (effective.relayHttpUrl === undefined && effective.localRelay !== false) {
@@ -503,6 +514,12 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
       // activation failure: the panel stays available and reports the reason.
       reportStartFailure(ctx, `built-in LAN relay unavailable (${messageOf(error)})`)
     }
+  }
+  const restartConnection = async (): Promise<string> => {
+    await service.stop()
+    if (liveLocalRelay !== undefined) service.attachLocalRelay(liveLocalRelay)
+    await service.start()
+    return service.status
   }
   const switchToLocalRelay = async (port?: number): Promise<LocalRelayInfo> => {
     await service.stop()
@@ -534,6 +551,7 @@ export async function apply(ctx: WebRemotePluginContext, config?: WebRemotePlugi
         start: switchToLocalRelay,
         enabled: effective.localRelay !== false,
       },
+      restart: restartConnection,
     }))
   }
   let disposed = false
@@ -586,6 +604,15 @@ function mergeRuntimeConfig(
       : { localRelay: { ...(stored.localRelay.port === undefined ? {} : { port: stored.localRelay.port }) } }),
     ...(stored.pairingUrlBase === undefined ? {} : { pairingUrlBase: stored.pairingUrlBase }),
     ...(stored.registrationToken === undefined ? {} : { registrationToken: stored.registrationToken }),
+  }
+}
+
+/** The already-provided host service, when a previous instance still owns it. */
+function getProvidedService(ctx: WebRemotePluginContext): unknown {
+  try {
+    return ctx.get?.<unknown>('webRemoteHost')
+  } catch {
+    return undefined
   }
 }
 

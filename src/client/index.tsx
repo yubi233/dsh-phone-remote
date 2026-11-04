@@ -17,6 +17,7 @@ import {
   describeApiError,
   fetchConsoleDevices,
   fetchConsoleStatus,
+  restartConnection,
   revokeConsoleDevice,
   setupRelay,
   startLocalRelay,
@@ -102,6 +103,15 @@ function ConsolePanel(props: { onClose: () => void }): ReactNode {
     }
   }, [])
 
+  const restart = useCallback(async (): Promise<void> => {
+    try {
+      await restartConnection()
+    } catch (error) {
+      setLoadError(describeApiError(error))
+    }
+    await refreshStatus()
+  }, [refreshStatus])
+
   useEffect(() => {
     void refreshStatus()
   }, [refreshStatus])
@@ -119,7 +129,7 @@ function ConsolePanel(props: { onClose: () => void }): ReactNode {
         {status === undefined && loadError === undefined ? <p style={mutedStyle}>读取中…</p> : null}
         {status !== undefined ? (
           <>
-            <StatusCard status={status} onRefresh={() => void refreshStatus()} />
+            <StatusCard status={status} onRefresh={() => void refreshStatus()} onRestart={() => void restart()} />
             <SetupCard status={status} onConfigured={() => void refreshStatus()} />
             {status.configured ? <PairingCard /> : null}
             {status.configured ? <DevicesCard /> : null}
@@ -131,7 +141,7 @@ function ConsolePanel(props: { onClose: () => void }): ReactNode {
   )
 }
 
-function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void }): ReactNode {
+function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void; onRestart: () => void }): ReactNode {
   const state = props.status
   return (
     <section style={cardStyle}>
@@ -156,17 +166,22 @@ function StatusCard(props: { status: ConsoleStatus; onRefresh: () => void }): Re
           最近错误：{state.lastError.message ?? state.lastError.code}
         </div>
       ) : null}
-      <div>
+      <div style={rowStyle}>
         <button type="button" style={ghostButtonStyle} onClick={props.onRefresh}>
           刷新状态
         </button>
+        {state.configured && state.state !== 'online' ? (
+          <button type="button" style={primaryButtonStyle} onClick={() => void props.onRestart()}>
+            重新连接
+          </button>
+        ) : null}
       </div>
     </section>
   )
 }
 
 function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): ReactNode {
-  const [relayUrl, setRelayUrl] = useState(props.status.relayHttpUrl ?? '')
+  const [relayUrl, setRelayUrl] = useState('')
   const [token, setToken] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | undefined>(undefined)
@@ -209,6 +224,11 @@ function SetupCard(props: { status: ConsoleStatus; onConfigured: () => void }): 
   return (
     <section style={cardStyle}>
       <strong>中继服务器</strong>
+      {props.status.localRelay !== undefined ? (
+        <div style={mutedStyle}>
+          当前使用内置局域网中继，无需填写。要改用外部中继时在下方填写地址。
+        </div>
+      ) : null}
       <label style={labelStyle}>
         中继地址
         <input

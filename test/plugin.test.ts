@@ -179,6 +179,17 @@ describe('web-remote-host start retry', () => {
   })
 })
 
+describe('web-remote-host single instance', () => {
+  it('stands down when a previous instance already owns webRemoteHost', async () => {
+    const { ctx, provided, effects } = makeContext()
+    ;(ctx as { get?: (name: string) => unknown }).get = (name: string) =>
+      name === 'webRemoteHost' ? { status: 'online' } : undefined
+    await apply(ctx, config)
+    expect(provided.get('webRemoteHost')).toBeUndefined()
+    expect(effects).toHaveLength(0)
+  })
+})
+
 describe('web-remote-host built-in LAN relay', () => {
   it('auto-starts a LAN relay when no external relay is configured', async () => {
     const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs')

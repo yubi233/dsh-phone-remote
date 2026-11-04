@@ -66,6 +66,8 @@ export interface RelayConsoleService {
 
 export interface RelayConsoleOptions {
   readonly service: RelayConsoleService
+  /** Reconnect the Host transport (stop, re-attach, start); returns the new state. */
+  readonly restart?: () => Promise<string>
   /** Built-in LAN relay controls; omitted when the deployment disables it. */
   readonly localRelay?: {
     /** Switch to the built-in relay (stopping any external one); returns its info. */
@@ -150,6 +152,15 @@ async function handleConsoleRequest(
           error instanceof Error ? error.message : String(error),
         )
       }
+      return
+    }
+
+    if (method === 'POST' && path === '/api/web-remote/restart') {
+      req.resume()
+      if (options.restart === undefined) {
+        throw new ConsoleError(409, 'NOT_SUPPORTED', 'restart is not available on this deployment')
+      }
+      writeJson(res, 200, { ok: true, state: await options.restart() })
       return
     }
 

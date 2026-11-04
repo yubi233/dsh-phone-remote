@@ -167,6 +167,14 @@ function parseLocalRelay(value: unknown): { lanUrl: string; port: number } {
   return { lanUrl: record['lanUrl'], port: record['port'] }
 }
 
+/** Reconnect the Host transport; resolves with the new state name. */
+export async function restartConnection(): Promise<string> {
+  return await request('/api/web-remote/restart', (value) => {
+    const state = (value as { state?: unknown } | null)?.state
+    return typeof state === 'string' ? state : 'unknown'
+  }, { method: 'POST' })
+}
+
 /** Start (or restart) the built-in LAN relay and switch the Host onto it. */
 export async function startLocalRelay(port?: number): Promise<{ lanUrl: string; port: number }> {
   return await request('/api/web-remote/local', (value) => {

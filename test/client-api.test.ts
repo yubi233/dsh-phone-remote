@@ -4,6 +4,7 @@ import {
   describeApiError,
   fetchConsoleDevices,
   fetchConsoleStatus,
+  restartConnection,
   revokeConsoleDevice,
   setupRelay,
   startLocalRelay,
@@ -169,5 +170,15 @@ describe('local relay client', () => {
     const info = await startLocalRelay(8787)
     expect(capturedBody).toEqual({ port: 8787 })
     expect(info).toEqual({ lanUrl: 'http://192.168.1.5:8787', port: 8787 })
+  })
+})
+
+
+describe('restart client', () => {
+  it('returns the new state name', async () => {
+    const fetchStub = async (_input: RequestInfo | URL): Promise<Response> =>
+      new Response(JSON.stringify({ ok: true, state: 'online' }), { status: 200 })
+    vi.stubGlobal('fetch', fetchStub)
+    await expect(restartConnection()).resolves.toBe('online')
   })
 })
