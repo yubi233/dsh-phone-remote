@@ -525,14 +525,20 @@ export class HostRemote {
    * travel as `rpc-frame` batches and are reassembled by the carrier.
    */
   #sendRpcValue(rpcId: string, value: unknown): void {
-    let serialized: string
+    let serialized: string | undefined
     try {
       serialized = JSON.stringify(value)
     } catch (error) {
       this.#sendRpcFailure(rpcId, 'host/result-invalid', `RPC result is not serializable: ${errorMessage(error)}`)
       return
     }
-    const bytes = Buffer.byteLength(serialized, 'utf8')
+    // `JSON.stringify` returns `undefined` — not a string — for `undefined`,
+    // functions, and symbols. The Host answers `$events/result`, the phone's
+    // interaction reply, with `{ ok: true, value: undefined }`, so measuring that
+    // value here throws and escapes `#handleRpcCall` as an unhandled rejection.
+    // Measure it as `null`: `#send` drops an undefined `value`, so the peer
+    // receives a value-less success result, which a void endpoint tolerates.
+    const bytes = Buffer.byteLength(serialized ?? 'null', 'utf8')
     if (bytes <= RPC_RESULT_FRAGMENT_THRESHOLD) {
       this.#send({ type: 'rpc-result', rpcId, ok: true, value })
       return
