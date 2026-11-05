@@ -405,6 +405,63 @@ describe('HostRemote connection', () => {
     await harness.remote.stop()
   })
 
+  it('answers a void rpc result without raising an unhandled rejection', async () => {
+    // The Host gateway answers `$events/result` — the phone's interaction reply,
+    // sent whenever the user taps 批准 / 拒绝 — with `{ ok: true, value: undefined }`.
+    // `JSON.stringify(undefined)` returns `undefined` rather than a string, so the
+    // carrier must not hand that to `Buffer.byteLength`: the throw would escape
+    // `#handleRpcCall` as an unhandled rejection, and a Host that treats those as
+    // fatal would exit, killing every session it serves.
+    const rejections: unknown[] = []
+    let onRejection: (error: unknown) => void = () => undefined
+    const firstRejection = new Promise<unknown>((resolve) => {
+      onRejection = (error: unknown): void => {
+        rejections.push(error)
+        resolve(error)
+      }
+    })
+    const bridge: HostBridge = {
+      async call(): Promise<HostRpcResult> {
+        return { ok: true, value: undefined }
+      },
+      open: idleOpen,
+    }
+    const harness = await startOnline(bridge)
+    const relay = harness.pairs[0]!.relay
+    process.on('unhandledRejection', onRejection)
+    try {
+      relay.deliver({
+        type: 'data',
+        payload: {
+          type: 'rpc-call',
+          rpcId: 'rpc-void',
+          endpoint: '$events/result',
+          payload: { args: {} },
+        },
+      })
+      const outcome = await Promise.race([
+        relay
+          .waitFor(
+            (message) => isRecord(message) && message.type === 'data' &&
+              isRecord(message.payload) && message.payload.rpcId === 'rpc-void',
+          )
+          .then((message) => ({ reply: message })),
+        firstRejection.then((error) => ({ rejection: error })),
+      ])
+      if ('rejection' in outcome) throw outcome.rejection
+      expect(appPayload(outcome.reply)).toEqual({
+        type: 'rpc-result',
+        rpcId: 'rpc-void',
+        ok: true,
+      })
+      await flushMicrotasks(8)
+      expect(rejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+      await harness.remote.stop()
+    }
+  })
+
   it('fragments large rpc results into rpc-frame messages', async () => {
     const value = { blob: 'x'.repeat(700 * 1024), note: 'large' }
     const bridge: HostBridge = {
